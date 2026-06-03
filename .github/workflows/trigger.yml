@@ -1,6 +1,7 @@
 name: Trigger Investment Pipeline
 
 on:
+  workflow_dispatch:
   schedule:
     # Pre-market: 8:35 Beijing (00:35 UTC) Mon-Fri
     - cron: "35 0 * * 1-5"
