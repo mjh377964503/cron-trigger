@@ -1,0 +1,32 @@
+name: Trigger Investment Emails
+
+on:
+  schedule:
+    # Pre-market: 8:35 Beijing = 00:35 UTC Mon-Fri
+    - cron: "35 0 * * 1-5"
+    # Daily brief: 16:00 Beijing = 08:00 UTC Mon-Fri
+    - cron: "0 8 * * 1-5"
+
+jobs:
+  trigger:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger notify workflow
+        env:
+          PAT: ${{ secrets.INVESTMENT_PAT }}
+        run: |
+          HOUR=$(date -u +%-H)
+          MINUTE=$(date -u +%-M)
+
+          if [ "$HOUR" = "0" ] && [ "$MINUTE" -ge "35" ]; then
+            MODE="pre_market"
+          else
+            MODE="daily"
+          fi
+
+          curl -X POST \
+            "https://api.github.com/repos/mjh377964503/investment-knowledge/actions/workflows/285038872/dispatches" \
+            -H "Authorization: token $PAT" \
+            -H "Accept: application/vnd.github.v3+json" \
+            -H "Content-Type: application/json" \
+            -d "{\"ref\":\"main\",\"inputs\":{\"mode\":\"$MODE\"}}"
