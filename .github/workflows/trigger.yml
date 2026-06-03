@@ -1,32 +1,84 @@
-name: Trigger Investment Emails
+name: Trigger Investment Pipeline
 
 on:
   schedule:
-    # Pre-market: 8:35 Beijing = 00:35 UTC Mon-Fri
+    # Pre-market: 8:35 Beijing (00:35 UTC) Mon-Fri
     - cron: "35 0 * * 1-5"
-    # Daily brief: 16:00 Beijing = 08:00 UTC Mon-Fri
+    # Daily data fetch: 15:30 Beijing (07:30 UTC) Mon-Fri
+    - cron: "30 7 * * 1-5"
+    # Daily brief: 16:00 Beijing (08:00 UTC) Mon-Fri
     - cron: "0 8 * * 1-5"
+    # Weekly data fetch: 19:50 Beijing (11:50 UTC) Sunday
+    - cron: "50 11 * * 0"
+    # Weekly reminder: 20:00 Beijing (12:00 UTC) Sunday
+    - cron: "0 12 * * 0"
+    # Monthly: 9:00 Beijing (01:00 UTC) 2nd
+    - cron: "0 1 2 * *"
+    # Quarterly: 10:00 Beijing (02:00 UTC) Mar/Jun/Sep/Dec 1st
+    - cron: "0 2 1 3,6,9,12 *"
+    # Semi-annual: 10:00 Beijing (02:00 UTC) Jan 1, Jul 1
+    - cron: "0 2 1 1,7 *"
 
 jobs:
   trigger:
     runs-on: ubuntu-latest
     steps:
-      - name: Trigger notify workflow
+      - name: Dispatch
         env:
           PAT: ${{ secrets.INVESTMENT_PAT }}
         run: |
           HOUR=$(date -u +%-H)
           MINUTE=$(date -u +%-M)
+          DOW=$(date -u +%u)
+          DOM=$(date -u +%-d)
+          MONTH=$(date -u +%-m)
 
+          REPO="mjh377964503/investment-knowledge"
+          NOTIFY_ID="285038872"
+          DAILY_ID="285024295"
+          WEEKLY_ID="285024298"
+
+          AUTH="Authorization: token $PAT"
+          ACCEPT="Accept: application/vnd.github.v3+json"
+          CT="Content-Type: application/json"
+          DISPATCH="https://api.github.com/repos/$REPO/actions/workflows"
+
+          curl_post() {
+            curl -s -o /dev/null -w "%{http_code}" -X POST "$1" -H "$AUTH" -H "$ACCEPT" -H "$CT" -d "$2"
+          }
+
+          # --- Determine which notification mode ---
           if [ "$HOUR" = "0" ] && [ "$MINUTE" -ge "35" ]; then
             MODE="pre_market"
-          else
+          elif [ "$HOUR" = "7" ] && [ "$MINUTE" -ge "30" ]; then
+            # Daily data fetch — trigger daily.yml
+            echo "Triggering daily data fetch..."
+            CODE=$(curl_post "$DISPATCH/$DAILY_ID/dispatches" '{"ref":"main"}')
+            echo "daily.yml → $CODE"
+            exit 0
+          elif [ "$HOUR" = "8" ] && [ "$MINUTE" -lt "10" ]; then
             MODE="daily"
+          elif [ "$DOW" = "7" ] && [ "$HOUR" = "11" ] && [ "$MINUTE" -ge "50" ]; then
+            # Weekly data fetch — trigger weekly.yml
+            echo "Triggering weekly data fetch..."
+            CODE=$(curl_post "$DISPATCH/$WEEKLY_ID/dispatches" '{"ref":"main"}')
+            echo "weekly.yml → $CODE"
+            exit 0
+          elif [ "$DOW" = "7" ] && [ "$HOUR" = "12" ]; then
+            MODE="weekly"
+          elif [ "$HOUR" = "1" ] && [ "$DOM" = "2" ]; then
+            MODE="monthly"
+          elif [ "$HOUR" = "2" ] && [ "$DOM" = "1" ]; then
+            case "$MONTH" in
+              1|7) MODE="semiannual" ;;
+              3|6|9|12) MODE="quarterly" ;;
+              *) exit 0 ;;
+            esac
+          else
+            echo "No matching mode, skipping. H=$HOUR M=$MINUTE DOW=$DOW DOM=$DOM"
+            exit 0
           fi
 
-          curl -X POST \
-            "https://api.github.com/repos/mjh377964503/investment-knowledge/actions/workflows/285038872/dispatches" \
-            -H "Authorization: token $PAT" \
-            -H "Accept: application/vnd.github.v3+json" \
-            -H "Content-Type: application/json" \
-            -d "{\"ref\":\"main\",\"inputs\":{\"mode\":\"$MODE\"}}"
+          echo "Triggering notify.yml ($MODE)..."
+          CODE=$(curl_post "$DISPATCH/$NOTIFY_ID/dispatches" "{\"ref\":\"main\",\"inputs\":{\"mode\":\"$MODE\"}}")
+          echo "notify.yml ($MODE) → $CODE"
